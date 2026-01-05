@@ -7,10 +7,10 @@ import logging
 from threading import Thread
 
 
-MAX_THREADS = 16
+MAX_THREADS = 12
 
 
-def save_to_file(content: str, filename: str = 'input.txt'):
+def save_to_file(content: str, filename: str = 'input.txt') -> None:
     with open(filename, 'w', encoding='utf-8') as f:
         f.write("""
 # audio ; http://link.com ; song file name
@@ -21,7 +21,7 @@ def save_to_file(content: str, filename: str = 'input.txt'):
         f.write(content)
 
 
-def clean_filename(filename, replacement="-"):
+def clean_filename(filename: str, replacement="-") -> None:
     # / \ : * ? " < > | и управляющие символы 0-31
     forbidden_chars = r'[\\/:\*\?"<>|\x00-\x1f]'
     cleaned = re.sub(forbidden_chars, replacement, filename)
@@ -59,7 +59,7 @@ def parse_items(lines: list[str]) -> list[dict]:
     return items
 
 
-def get_playlist(url: str):
+def get_playlist(url: str) -> str:
     url = url.strip()
     ydl_opts = {
         'quiet': True,
@@ -82,13 +82,16 @@ def get_playlist(url: str):
             title = f"{'0'*zeros}{num}.{title}"
             result += f"{ftype} ; {vid_url} ; {title}\n"
     
-    return result
+    now = time.strftime("%Y-%m-%d_%H-%M-%S", time.localtime(time.time()))
+    name = info.get("title", f"Playlist-{now}")
+    
+    return name, result
 
 
-def download_item(item: dict) -> None:
+def download_item(item: dict, catalogue:str = "") -> None:
     fn = clean_filename(item['filename'])
     opts = {
-        'outtmpl': "result/" + fn + '.%(ext)s',
+        'outtmpl': "result/" + catalogue + fn + '.%(ext)s',
     }
     if item['type'] == 'audio':
         opts['format'] = 'bestaudio/best'
@@ -114,25 +117,38 @@ def download_item(item: dict) -> None:
         logging.error(f"{type(e)} - {e}")
 
 
-def manage_threads(items: list[dict]) -> None:
+def manage_threads(items: list[dict], catalogue:str = "") -> None:
     items = items.copy()
     threads = []
     while threads or items:
         remove_finished_threads(threads)
         for item in items.copy():
             if len(threads) < MAX_THREADS:
-                threads.append(Thread(target=download_item, args=(item,)))
+                threads.append(Thread(target=download_item, args=(item, catalogue, )))
                 threads[-1].start()
                 items.remove(item)
         time.sleep(1)
 
 
 def main():
-    # with open('input.txt') as f:
-    #     lines = f.readlines()
     inp = input("Enter URL or entry: \n> ").strip()
-    if "/playlist" not in inp:
-        logging.warning("Not a playlist URL")
+
+    playlist = ""
+    if inp == "file":
+        with open('input.txt') as f:
+            lines = f.readlines()
+    elif inp.startswith("http") and "/playlist" in inp:
+        name, lines = get_playlist(inp)
+        lines = lines.split("\n")
+        playlist = name
+    else:
+        if inp.startswith("http"):
+            now = time.strftime("%Y-%m-%d_%H-%M-%S", time.localtime(time.time()))
+            if "//music.youtube.com/" in inp:
+                inp = f"audio ; {inp} ; music_{now}"
+            else:
+                inp = f"video ; {inp} ; video_{now}"
+
         try:
             items = parse_items(inp.split("\n"))
             if not items:
@@ -142,25 +158,27 @@ def main():
             logging.debug(f"{type(e)} - {e}")
             logging.error("Invalid input")
             print("""
-Expected youtube playlist url or single entry. Example:
+Expected youtube playlist/video/music url or single entry. Example:
 
 https://youtube.com/playlist?list=example
+or
+https://youtube.com/watch?v=example
+or
+https://music.youtube.com/watch?v=example
 or
 audio ; https://music.youtube.com/watch?v=example ; song file name
 or
 video ; https://youtube.com/watch?v=example ; video file name
 """)
         return
-
-    url = inp
-    lines = get_playlist(url).split("\n")
+    
     logging.info(f"Read {len(lines)} lines")
 
     items = parse_items(lines)
     logging.info(f"Parsed {len(items)} items")
     
     beginning = time.time()
-    manage_threads(items)
+    manage_threads(items, playlist)
     for f in os.listdir("result"):
         if len(f) <= 4 or (f[-4:] != ".mp4" and f[-4:] != ".mp3"):
             os.remove(os.path.join("result", f))
@@ -190,7 +208,7 @@ video ; https://youtube.com/watch?v=example ; video file name
         logging.info(f"Retrying failed items ({i+1}/3):")
 
         for item in failed:
-            download_item(item)
+            download_item(item, playlist)
 
 
 if __name__ == "__main__":
@@ -201,8 +219,8 @@ if __name__ == "__main__":
         level=logging.DEBUG,
         format="[%(asctime)s] %(levelname)s - %(message)s",
         handlers=[
-            logging.StreamHandler(sys.stdout),  # Вывод в stdout
-            logging.FileHandler(log_file, encoding="utf-8")       # Запись в файл
+            logging.StreamHandler(sys.stdout),
+            logging.FileHandler(log_file, encoding="utf-8")
         ],
     )
     main()
