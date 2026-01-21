@@ -2,8 +2,13 @@ import re
 import os
 import sys
 import time
+import json
 import yt_dlp
 import logging
+import tempfile
+import requests
+import subprocess
+from pathlib import Path
 from threading import Thread
 
 
@@ -38,6 +43,85 @@ def clean_filename(filename: str, replacement="-") -> None:
     return cleaned
 
 
+def add_square_thumbnail_to_audio(audio_path: str, thumbnail_url: str) -> bool:
+    audio_path = Path(audio_path).resolve()
+    if not audio_path.is_file():
+        logging.warning(f"[{audio_path}] File not found")
+        return False
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        tmpdir = Path(tmpdir)
+        temp_image = tmpdir / "thumb_original.jpg"
+        temp_square = tmpdir / "thumb_square.jpg"
+
+        try:
+            resp = requests.get(
+                thumbnail_url,
+                timeout=12,
+                stream=True,
+                allow_redirects=True,
+            )
+            resp.raise_for_status()
+            
+            with open(temp_image, "wb") as f:
+                for chunk in resp.iter_content(8192):
+                    f.write(chunk)
+        except Exception as e:
+            logging.warning(f"[{audio_path}] Thumbnail download error: {e}")
+            return False
+
+        cmd_crop = [
+            "ffmpeg", "-y",
+            "-loglevel", "quiet",
+            "-i", str(temp_image),
+            "-vf", r"crop=min(iw\,ih):min(iw\,ih):(iw-ow)/2:(ih-oh)/2",
+            "-update", "1",
+            str(temp_square)
+        ]
+
+        try:
+            subprocess.run(
+                cmd_crop,
+                check=True,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            )
+        except subprocess.CalledProcessError as e:
+            logging.warning(f"[{audio_path}] Image crop error: {e}")
+            return False
+
+        cmd_embed = [
+            "ffmpeg", "-y",
+            "-loglevel", "quiet",
+            "-i", str(temp_square),
+            "-i", str(audio_path),
+            "-map", "0:v",
+            "-map", "1:a",
+            "-map_metadata", "1","-c", "copy",
+            "-disposition:v", "attached_pic",
+            "-metadata:s:v", "title=Cover",
+            str(audio_path) + ".temp.mp3"
+        ]
+
+        try:
+            subprocess.run(
+                cmd_embed,
+                check=True,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            )
+            
+            os.replace(str(audio_path) + ".temp.mp3", audio_path)
+            logging.info(f"[{audio_path}] Thumbnail was added successfully: {audio_path}")
+            return True
+            
+        except subprocess.CalledProcessError as e:
+            logging.warning(f"[{audio_path}] Thumbnail insert to audio file error: {e}")
+            if (audio_path.with_suffix(".temp.mp3")).exists():
+                (audio_path.with_suffix(".temp.mp3")).unlink()
+            return False
+
+
 def remove_finished_threads(threads: list[Thread]) -> list[Thread]:
     for thread in threads.copy():
         if not thread.is_alive():
@@ -69,11 +153,15 @@ def get_playlist(url: str) -> str:
     with yt_dlp.YoutubeDL(ydl_opts) as ydl:
         info = ydl.extract_info(url, download=False)
     
+    import json
+    with open("playlist.json", "w", encoding="utf-8") as f:
+        json.dump(dict(info), f, indent=4)
     num = 0
     result = ""
     amount = len([i for i in info.get('entries', []) if i.get('url')])
     for entry in info.get('entries', []):
-        title = entry.get('title', 'Untitled')
+        # title = entry.get('title', 'Untitled')
+        title = "%(title)s"
         vid_url = entry.get('url', '')
         if vid_url:
             num += 1
@@ -88,32 +176,77 @@ def get_playlist(url: str) -> str:
     return name, result
 
 
-def download_item(item: dict, catalogue:str = "") -> None:
+def download_item(item: dict, catalogue: str = "") -> None:
     fn = clean_filename(item['filename'])
+    
+    catalogue_processed = catalogue.strip('/\\').replace('\\', '/').split('/')[-1]
+    if catalogue_processed.startswith("Album - "):
+        catalogue_processed = catalogue_processed[8:]
+    
     opts = {
         'outtmpl': "result/" + catalogue + fn + '.%(ext)s',
+        'noplaylist': True,
+        # 'quiet': True,
+        # 'cookiesfrombrowser': ('firefox',),
+        'no_warnings': True,
+        'noprogress': True,
+        'print-traffic': False,
+        'retries': 1,
+        'fragment_retries': 3,
+        'concurrent_fragment_downloads': 4,
+        'postprocessors': []
     }
-    if item['type'] == 'audio':
+
+    is_audio = item['type'] == 'audio'
+
+    if is_audio:
         opts['format'] = 'bestaudio/best'
-        opts['postprocessors'] = [
+        opts['postprocessors'].append(
             {
                 'key': 'FFmpegExtractAudio',
                 'preferredcodec': 'mp3',
                 'preferredquality': '320',
             }
-        ]
-    else:  # video
+        )
+    else:    # video
         opts['format'] = 'bv*[ext=mp4]+ba[ext=m4a]/b[ext=mp4]'
-        opts['remuxvideo'] = 'mp4'
+        opts['postprocessors'].append(
+            {
+                'key': 'FFmpegVideoRemuxer',
+                'preferedformat': 'mp4',
+            }
+        )
+
+    opts['postprocessors'].append({'key': 'FFmpegMetadata'})
+
+    name_list = [None]
+    def filename_hook(d):
+        if d['status'] == 'finished' and name_list[0] is None:
+            name_list[0] = d.get('info_dict', {}).get('_filename')
+            if not name_list[0]:
+                name_list[0] = d.get('filename', "Unknown.webm")
+
+    opts['progress_hooks'] = [filename_hook]
 
     logging.info(f"Downloading '{fn}'...")
 
     try:
         with yt_dlp.YoutubeDL(opts) as ydl:
-            ydl.download([item['url']])
-        logging.info(f"Download complete '{fn}'")
+            info = ydl.extract_info(item['url'], download=True)
+            with open(f"video_info.json", "w", encoding="utf-8") as f:
+                json.dump(info, f, indent=2)
+            ydl.process_info(ydl.sanitize_info(info))
+            if not name_list[0]:
+                name_list[0] = "Unknown.idk"
+            final_filename = str(name_list[0].rsplit('.', 1)[0])
+            final_filename += ".mp3" if is_audio else ".mp4"
+            if is_audio:
+                logging.debug(f"[{final_filename}] Attaching thumbnail to audio {info["thumbnail"]}")
+                add_square_thumbnail_to_audio(final_filename, info["thumbnail"])
+            
+        logging.info(f"Download complete '{final_filename}'")
     except Exception as e:
-        logging.error(f"Download {item['filename']} failed")
+        logging.error(f"Download {item['filename']} ({item['url']}) failed")
         logging.error(f"{type(e)} - {e}")
 
 
@@ -130,9 +263,7 @@ def manage_threads(items: list[dict], catalogue:str = "") -> None:
         time.sleep(1)
 
 
-def main():
-    inp = input("Enter URL or entry: \n> ").strip()
-
+def main(inp):
     playlist = ""
     if inp == "file":
         with open('input.txt') as f:
@@ -140,14 +271,13 @@ def main():
     elif inp.startswith("http") and "/playlist" in inp:
         name, lines = get_playlist(inp)
         lines = lines.split("\n")
-        playlist = name
+        playlist = f"{name}/"
     else:
         if inp.startswith("http"):
-            now = time.strftime("%Y-%m-%d_%H-%M-%S", time.localtime(time.time()))
             if "//music.youtube.com/" in inp:
-                inp = f"audio ; {inp} ; music_{now}"
+                inp = f"audio ; {inp} ; %(title)s"
             else:
-                inp = f"video ; {inp} ; video_{now}"
+                inp = f"video ; {inp} ; %(title)s"
 
         try:
             items = parse_items(inp.split("\n"))
@@ -179,14 +309,20 @@ video ; https://youtube.com/watch?v=example ; video file name
     
     beginning = time.time()
     manage_threads(items, playlist)
-    for f in os.listdir("result"):
+    new_files = [
+        f for f in os.listdir(f"result/{playlist}")
+        if (not os.path.isdir(f"result/{playlist}{f}")) 
+        and (os.path.getmtime(os.path.join(f"result/{playlist}", f)) > beginning)
+    ]
+    for f in new_files:
         if len(f) <= 4 or (f[-4:] != ".mp4" and f[-4:] != ".mp3"):
-            os.remove(os.path.join("result", f))
+            os.remove(os.path.join(f"result/{playlist}", f))
 
     for i in range(4):
         new_files = [
-            f for f in os.listdir("result")
-            if os.path.getmtime(os.path.join("result", f)) > beginning
+            f for f in os.listdir(f"result/{playlist}")
+            if (not os.path.isdir(f"result/{playlist}{f}")) 
+            and (os.path.getmtime(os.path.join(f"result/{playlist}", f)) > beginning)
         ]
         logging.info(f"Done {len(new_files)}/{len(items)}")
         if len(new_files) == len(items):
@@ -212,16 +348,22 @@ video ; https://youtube.com/watch?v=example ; video file name
 
 
 if __name__ == "__main__":
-    log_file = f"logs/log_{int(time.time()*1000)}.txt"
+    try:
+        inp = input("Enter URL or entry: \n> ").strip()
+    except:
+        sys.exit(1)
     os.makedirs("logs", exist_ok=True)
     os.makedirs("result", exist_ok=True)
+    log_file = f"logs/log_{int(time.time()*1000)}.txt"
     logging.basicConfig(
         level=logging.DEBUG,
         format="[%(asctime)s] %(levelname)s - %(message)s",
         handlers=[
             logging.StreamHandler(sys.stdout),
-            logging.FileHandler(log_file, encoding="utf-8")
+            logging.FileHandler(log_file, encoding="utf-8"),
         ],
     )
-    main()
-    print(f"Logs were saved to {log_file}")
+    try:
+        main(inp)
+    finally:
+        print(f"Logs were saved to {log_file}")

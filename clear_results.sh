@@ -1,1 +1,1 @@
-rm result/*
+rm result/* -r
