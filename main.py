@@ -12,14 +12,15 @@ from pathlib import Path
 from threading import Thread
 
 
-MAX_THREADS = 12
+MAX_THREADS = 8
+USE_COOKIES = True
 
 
 def save_to_file(content: str, filename: str = 'input.txt') -> None:
     with open(filename, 'w', encoding='utf-8') as f:
         f.write("""
-# audio ; http://link.com ; song file name
-# video ; https://link.com ; video file name
+# audio ; http://link.com ; song %(title)s
+# video ; https://link.com ; video %(title)s
 
 
 """)
@@ -177,17 +178,23 @@ def get_playlist(url: str) -> str:
 
 
 def download_item(item: dict, catalogue: str = "") -> None:
+    if "instagram.com/reel/" in item['filename']:
+        item['filename'] = item['filename'].replace(
+            "%(title)s", f"reel-{int(time.time()*1000)}"
+        )
     fn = clean_filename(item['filename'])
     
     catalogue_processed = catalogue.strip('/\\').replace('\\', '/').split('/')[-1]
-    if catalogue_processed.startswith("Album - "):
-        catalogue_processed = catalogue_processed[8:]
+    if (
+        catalogue_processed.startswith("Album - ")
+        and catalogue_processed[8:].strip()
+    ):
+        catalogue_processed = catalogue_processed[8:].strip()
     
     opts = {
         'outtmpl': "result/" + catalogue + fn + '.%(ext)s',
         'noplaylist': True,
         # 'quiet': True,
-        # 'cookiesfrombrowser': ('firefox',),
         'no_warnings': True,
         'noprogress': True,
         'print-traffic': False,
@@ -196,6 +203,9 @@ def download_item(item: dict, catalogue: str = "") -> None:
         'concurrent_fragment_downloads': 4,
         'postprocessors': []
     }
+
+    if USE_COOKIES:
+        opts['cookiesfrombrowser'] = ('firefox',)
 
     is_audio = item['type'] == 'audio'
 
@@ -232,16 +242,28 @@ def download_item(item: dict, catalogue: str = "") -> None:
 
     try:
         with yt_dlp.YoutubeDL(opts) as ydl:
-            info = ydl.extract_info(item['url'], download=True)
+            t1 = time.time()
+            info = ydl.extract_info(item['url'], download=False)
+            t1 = time.time()-t1
             with open(f"video_info.json", "w", encoding="utf-8") as f:
                 json.dump(info, f, indent=2)
-            ydl.process_info(ydl.sanitize_info(info))
+            t2 = time.time()
+            ydl.download(item['url'])
+            t2 = time.time()-t2
             if not name_list[0]:
                 name_list[0] = "Unknown.idk"
             final_filename = str(name_list[0].rsplit('.', 1)[0])
             final_filename += ".mp3" if is_audio else ".mp4"
-            if is_audio:
-                logging.debug(f"[{final_filename}] Attaching thumbnail to audio {info["thumbnail"]}")
+            fn = final_filename.replace("\\", "/").split("/")[-1]
+            logging.debug(f"[{fn}] Info extract time {t1}s")
+            logging.debug(f"[{fn}] Downloading time {t2}s")
+            if (
+                is_audio 
+                and "youtube.com/" in item['url'] 
+                and "thumbnail" in info 
+                and info["thumbnail"]
+            ):
+                logging.debug(f"[{fn}] Attaching thumbnail to audio {info["thumbnail"]}")
                 add_square_thumbnail_to_audio(final_filename, info["thumbnail"])
             
         logging.info(f"Download complete '{final_filename}'")
@@ -311,18 +333,25 @@ video ; https://youtube.com/watch?v=example ; video file name
     manage_threads(items, playlist)
     new_files = [
         f for f in os.listdir(f"result/{playlist}")
-        if (not os.path.isdir(f"result/{playlist}{f}")) 
-        and (os.path.getmtime(os.path.join(f"result/{playlist}", f)) > beginning)
+        if not os.path.isdir(f"result/{playlist}{f}")
+        and os.path.getmtime(os.path.join(f"result/{playlist}", f)) > beginning
     ]
     for f in new_files:
-        if len(f) <= 4 or (f[-4:] != ".mp4" and f[-4:] != ".mp3"):
+        if (
+            len(f) <= 4 
+            or (
+                f[-4:] != ".mp4" 
+                and f[-4:] != ".mp3"
+            ) 
+            or f.endswith(".mp3.temp.mp3")
+        ):
             os.remove(os.path.join(f"result/{playlist}", f))
 
     for i in range(4):
         new_files = [
             f for f in os.listdir(f"result/{playlist}")
-            if (not os.path.isdir(f"result/{playlist}{f}")) 
-            and (os.path.getmtime(os.path.join(f"result/{playlist}", f)) > beginning)
+            if not os.path.isdir(f"result/{playlist}{f}")
+            and os.path.getmtime(os.path.join(f"result/{playlist}", f)) > beginning
         ]
         logging.info(f"Done {len(new_files)}/{len(items)}")
         if len(new_files) == len(items):

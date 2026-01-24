@@ -13,3 +13,18 @@ pip install -r requirements.txt
 ```bash
 python main.py
 ```
+
+### Functional
+- type `help` in cli to get help
+- for youtube music playlists auto save as audio
+- for youtube music songs auto metadata + cover download
+- for instagram reels names are set as reel-timestamp
+- program will try to get cookies from firefox on your pc 
+
+### Troubleshooting
+if firefox cookies extraction causes errors 
+- try to download firefox
+- try to update firefox
+- try to close firefox before launching main.py
+- or finaly set `USE_COOKIES = False` in main.py
+
