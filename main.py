@@ -14,6 +14,7 @@ from threading import Thread
 
 MAX_THREADS = 8
 USE_COOKIES = True
+git_link = "https://github.com/BlogPlayCode/yt_playlist_downloader"
 
 
 def save_to_file(content: str, filename: str = 'input.txt') -> None:
@@ -376,7 +377,83 @@ video ; https://youtube.com/watch?v=example ; video file name
             download_item(item, playlist)
 
 
+def version_check():
+    current = ""
+    try:
+        with open(".version", "r") as f:
+            for l in str(f.read()):
+                if l in ".0123456789":
+                    current += l
+    except:
+        pass
+
+    current = [v for v in current.split('.') if v]
+    try:
+        current = list(map(int, current))
+    except:
+        current = [-1]
+    if not current:
+        current = [-1]
+    
+    print(f"  v{'.'.join([str(v) for v in current])}")
+    print()
+    
+    latest = ""
+    try:
+        url = git_link.strip('/').replace("://github.com/", "://raw.githubusercontent.com/")
+        url += "/refs/heads/main/.version"
+        resp = requests.get(url)
+        if resp.status_code // 100 not in [2, 3]:
+            raise ValueError()
+        text = resp.text
+        for l in text:
+            if l in ".0123456789":
+                latest += l
+    except:
+        print("  !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!")
+        print("    FAILED TO FETCH LATEST VERSION  ")
+        print("  !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!")
+        return
+
+    latest = [v for v in latest.split('.') if v]
+    try:
+        latest = list(map(int, latest))
+    except:
+        latest = [-1]
+    if not latest:
+        print("  !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!")
+        print("    FAILED TO FETCH LATEST VERSION  ")
+        print("  !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!")
+        return
+    
+    for key in range(len(latest)):
+        if key < len(current):
+            if latest[key] > current[key]:
+                break
+    else:
+        print(f"Program is up to date (v{'.'.join([str(v) for v in latest])})")
+        return
+    
+    print("  !!!!!!!!!!!!!!!!!!!!!")
+    print("    NEW VERSION FOUND  ")
+    print("  !!!!!!!!!!!!!!!!!!!!!")
+    print(f"Found better version v{'.'.join([str(v) for v in latest])}")
+    print(f"Update here: {git_link}")
+    print()
+
+
 if __name__ == "__main__":
+    print("""
+  ####     ####   ##   ##  ##  ##  ##      ####     ##    #####    ######  #####
+  ## ##   ##  ##  ##   ##  ### ##  ##     ##  ##   ####   ##  ##   ##      ##  ##
+  ##  ##  ##  ##  ##   ##  ######  ##     ##  ##  ##  ##  ##   ##  ##      ##  ##
+  ##  ##  ##  ##  ## # ##  ######  ##     ##  ##  ######  ##   ##  ####    #####
+  ##  ##  ##  ##  #######  ## ###  ##     ##  ##  ##  ##  ##   ##  ##      ####
+  ## ##   ##  ##  ### ###  ##  ##  ##     ##  ##  ##  ##  ##  ##   ##      ## ##
+  ####     ####   ##   ##  ##  ##  ######  ####   ##  ##  #####    ######  ##  ##
+""")
+    version_check()
+    print()
     try:
         inp = input("Enter URL or entry: \n> ").strip()
     except:
