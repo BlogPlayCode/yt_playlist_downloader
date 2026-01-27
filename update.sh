@@ -1,0 +1,1 @@
+venv/bin/python auto_update.py
