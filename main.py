@@ -377,7 +377,7 @@ video ; https://youtube.com/watch?v=example ; video file name
             download_item(item, playlist)
 
 
-def version_check():
+def version_check() -> bool:
     current = ""
     try:
         with open(".version", "r") as f:
@@ -413,7 +413,7 @@ def version_check():
         print("  !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!")
         print("    FAILED TO FETCH LATEST VERSION  ")
         print("  !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!")
-        return
+        return False
 
     latest = [v for v in latest.split('.') if v]
     try:
@@ -424,15 +424,15 @@ def version_check():
         print("  !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!")
         print("    FAILED TO FETCH LATEST VERSION  ")
         print("  !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!")
-        return
+        return False
     
     for key in range(len(latest)):
         if key < len(current):
             if latest[key] > current[key]:
                 break
     else:
-        print(f"Program is up to date (v{'.'.join([str(v) for v in latest])})")
-        return
+        print(f"Program is up to date (latest v{'.'.join([str(v) for v in latest])})")
+        return False
     
     print("  !!!!!!!!!!!!!!!!!!!!!")
     print("    NEW VERSION FOUND  ")
@@ -440,6 +440,7 @@ def version_check():
     print(f"Found better version v{'.'.join([str(v) for v in latest])}")
     print(f"Update here: {git_link}")
     print()
+    return True
 
 
 if __name__ == "__main__":

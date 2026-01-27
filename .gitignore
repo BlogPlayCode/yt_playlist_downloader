@@ -4,3 +4,4 @@ venv/*
 logs/*
 playlist.json
 video_info.json
+update.zip
