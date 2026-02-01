@@ -13,7 +13,7 @@ from threading import Thread
 
 
 MAX_THREADS = 8
-USE_COOKIES = True
+USE_COOKIES = False
 git_link = "https://github.com/BlogPlayCode/yt_playlist_downloader"
 
 
@@ -43,6 +43,21 @@ def clean_filename(filename: str, replacement="-") -> None:
     cleaned = cleaned.strip(". ")
 
     return cleaned
+
+
+def ytmusic_restore_link(old_link: str) -> str:
+    if "youtube.com/watch?" not in old_link:
+        return None
+    try:
+        url = old_link.split('youtube.com/watch?', 1)
+        url = "https://music.youtube.com/watch?" + url[1]
+        answer = requests.get(url)
+        answer.raise_for_status()
+        url = answer.text.split('://music.youtube.com/watch?v=', 1)[1]
+        url = url.split('"', 1)[0]
+        return f"https://music.youtube.com/watch?v={url}"
+    except:
+        return None
 
 
 def add_square_thumbnail_to_audio(audio_path: str, thumbnail_url: str) -> bool:
@@ -365,7 +380,7 @@ video ; https://youtube.com/watch?v=example ; video file name
                 if fn.split('.')[0] == item.get("filename", "").split('.')[0]:
                     break
             else:
-                failed.append(item)
+                failed.append(item.copy())
                 logging.info(item.get("filename", "Unknown"))
         
         if i == 3:
@@ -374,6 +389,19 @@ video ; https://youtube.com/watch?v=example ; video file name
         logging.info(f"Retrying failed items ({i+1}/3):")
 
         for item in failed:
+            if item['type'] == 'audio' and (
+                "://music.youtube.com/" in item['url']
+                or "://music.youtube.com/" in inp
+            ):
+                logging.info(f"Restoring link for {item['url']}...")
+                restored_url = ytmusic_restore_link(item['url'])
+                if not restored_url:
+                    logging.warning(f"Url restore failed for {item['url']}")
+                elif restored_url == item['url']:
+                    logging.debug(f"Restore returned same url {restored_url}")
+                else:
+                    logging.info(f"Restored {item['url']} -> {restored_url}")
+                    item['url'] = restored_url
             download_item(item, playlist)
 
 

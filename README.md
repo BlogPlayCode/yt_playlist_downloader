@@ -33,7 +33,7 @@ or run `python main.py` command
 - for youtube music playlists auto save as audio
 - for youtube music songs auto metadata + cover download
 - for instagram reels names are set as reel-timestamp
-- program will try to get cookies from firefox on your pc 
+- set `USE_COOKIES = True` in main.py for program to try to get cookies from firefox
 
 ---
 
