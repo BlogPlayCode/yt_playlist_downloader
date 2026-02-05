@@ -5,3 +5,7 @@ logs/*
 playlist.json
 video_info.json
 update.zip
+python
+python-embed.zip
+ffmpeg*
+7zr.exe

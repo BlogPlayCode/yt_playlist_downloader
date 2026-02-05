@@ -12,13 +12,11 @@ python -m venv venv
 4. Install dependencies:
 Linux:
 ```bash
-./venv/bin/activate
-pip install -r requirements.txt
+dependencies.sh
 ```
 Windows:
 ```bash
-.\venv\Scripts\activate.bat
-pip install -r requirements.txt
+dependencies.bat
 ```
 
 5. Launch script: 

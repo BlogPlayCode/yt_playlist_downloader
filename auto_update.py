@@ -81,6 +81,10 @@ def main():
         print(f"Update download error: {e}")
         input()
         return
+    try:
+        os.remove(zip_path)
+    except:
+        pass
     input("[UPDATER] Done. Press Enter to exit")
 
 

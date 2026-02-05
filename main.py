@@ -447,31 +447,44 @@ def version_check() -> bool:
     try:
         latest = list(map(int, latest))
     except:
-        latest = [-1]
+        latest = []
     if not latest:
         print("  !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!")
         print("    FAILED TO FETCH LATEST VERSION  ")
         print("  !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!")
         return False
     
-    for key in range(len(latest)):
-        if key < len(current):
-            if latest[key] > current[key]:
-                break
-    else:
-        print(f"Program is up to date (latest v{'.'.join([str(v) for v in latest])})")
-        return False
+    for i in range(max(len(current), len(latest))):
+        c = current[i] if i < len(current) else 0
+        l = latest[i]  if i < len(latest)  else 0
+        
+        if l > c:
+            print("  !!!!!!!!!!!!!!!!!!!!!")
+            print("    NEW VERSION FOUND  ")
+            print("  !!!!!!!!!!!!!!!!!!!!!")
+            print(f"Found better version v{'.'.join(map(str, latest))}")
+            print(f"Update here: {git_link}")
+            print()
+            return True
+        elif l < c:
+            print(f"Program is newer (local v{'.'.join(map(str, current))} > latest v{'.'.join(map(str, latest))})")
+            return False
     
-    print("  !!!!!!!!!!!!!!!!!!!!!")
-    print("    NEW VERSION FOUND  ")
-    print("  !!!!!!!!!!!!!!!!!!!!!")
-    print(f"Found better version v{'.'.join([str(v) for v in latest])}")
-    print(f"Update here: {git_link}")
-    print()
-    return True
+    print(f"Program is up to date (v{'.'.join(map(str, latest))})")
+    return False
 
 
 if __name__ == "__main__":
+    try:
+        subprocess.run(
+            "ffmpeg -L",
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            check=True
+        )
+    except:
+        print("FFmpeg is not found!")
+        sys.exit(1)
     print("""
   ####     ####   ##   ##  ##  ##  ##      ####     ##    #####    ######  #####
   ## ##   ##  ##  ##   ##  ### ##  ##     ##  ##   ####   ##  ##   ##      ##  ##
