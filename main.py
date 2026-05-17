@@ -321,6 +321,10 @@ def manage_threads(items: list[dict], catalogue:str = "", context: Context = Non
 def main(inp: str, context: Context = None) -> None:
     if not context:
         context = Context()
+    if inp.lower().strip() == "exit":
+        print("Exiting...")
+        context.single_input = True
+        return
     context.output = context.output.replace('\\', '/').rstrip('/')
     os.makedirs(context.output, exist_ok=True)
     playlist = ""
@@ -408,15 +412,5 @@ def main(inp: str, context: Context = None) -> None:
 
 
 if __name__ == "__main__":
-    try:
-        subprocess.run(
-            "ffmpeg -L",
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-            check=True
-        )
-    except:
-        print("FFmpeg not found!", file=sys.stderr)
-        sys.exit(1)
     start_module = importlib.import_module("yt-playlist-downloader")
-    start_module.cli()
+    start_module.launch()
