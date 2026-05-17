@@ -1,7 +1,8 @@
 __pycache__
-result/*
-venv/*
-logs/*
+*/__pycache__
+result
+venv
+logs
 playlist.json
 video_info.json
 update.zip

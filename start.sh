@@ -1,3 +1,3 @@
 #!/bin/bash
 
-venv/bin/python main.py && read
+venv/bin/python yt-playlist-downloader.py && read

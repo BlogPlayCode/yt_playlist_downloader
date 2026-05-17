@@ -1,16 +1,17 @@
 ## cli auto updater
 import os
+import cfg
 import time
 import zipfile
 import requests as rq
-from main import version_check, git_link
+from main import version_check
 
 
 zip_path = "./update.zip"
 
 
 def main():
-    need_update = version_check()
+    need_update, current, latest = version_check()
     print()
     if not need_update:
         print("[WARNING] Program is up to date, no update needed")
@@ -20,7 +21,7 @@ def main():
     if not answer or answer[0] != 'y':
         return
 
-    url = f"{git_link.strip('/')}/archive/refs/heads/main.zip"
+    url = f"{cfg.GIT_LINK.strip('/')}/archive/refs/heads/main.zip"
     try:
         print("[UPDATER] Downloading update...")
         resp = rq.get(url, stream=True, allow_redirects=True)

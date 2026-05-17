@@ -1,20 +1,26 @@
 import re
 import os
 import sys
+import cfg
 import time
 import json
 import yt_dlp
 import logging
 import tempfile
 import requests
+import importlib
 import subprocess
 from pathlib import Path
 from threading import Thread
+from dataclasses import dataclass
 
 
-MAX_THREADS = 8
-USE_COOKIES = False
-git_link = "https://github.com/BlogPlayCode/yt_playlist_downloader"
+@dataclass
+class Context:
+    single_input: bool = False
+    launch_checks: bool = True
+    output: str = cfg.DEFAULT_OUTPUT_DIR
+    cookies: str = cfg.COOKIES
 
 
 def save_to_file(content: str, filename: str = 'input.txt') -> None:
@@ -193,7 +199,9 @@ def get_playlist(url: str) -> str:
     return name, result
 
 
-def download_item(item: dict, catalogue: str = "") -> None:
+def download_item(item: dict, catalogue: str = "", context: Context = None) -> None:
+    if not context:
+        context = Context()
     if "instagram.com/reel/" in item['filename']:
         item['filename'] = item['filename'].replace(
             "%(title)s", f"reel-{int(time.time()*1000)}"
@@ -208,7 +216,7 @@ def download_item(item: dict, catalogue: str = "") -> None:
         catalogue_processed = catalogue_processed[8:].strip()
     
     opts = {
-        'outtmpl': "result/" + catalogue + fn + '.%(ext)s',
+        'outtmpl': f"{context.output}/" + catalogue + fn + '.%(ext)s',
         'noplaylist': True,
         # 'quiet': True,
         'no_warnings': True,
@@ -220,8 +228,8 @@ def download_item(item: dict, catalogue: str = "") -> None:
         'postprocessors': []
     }
 
-    if USE_COOKIES:
-        opts['cookiesfrombrowser'] = ('firefox',)
+    if context.cookies:
+        opts['cookiesfrombrowser'] = (context.cookies,)
 
     is_audio = item['type'] == 'audio'
 
@@ -270,6 +278,15 @@ def download_item(item: dict, catalogue: str = "") -> None:
                 name_list[0] = "Unknown.idk"
             final_filename = str(name_list[0].rsplit('.', 1)[0])
             final_filename += ".mp3" if is_audio else ".mp4"
+            splt = final_filename.split('.')
+            if len(splt) > 2:
+                if splt[-1] == splt[-2]:
+                    old_fn = final_filename
+                    final_filename = '.'.join(splt[:-1])
+                    try:
+                        os.rename(old_fn, final_filename)
+                    except OSError as e:
+                        final_filename = old_fn
             fn = final_filename.replace("\\", "/").split("/")[-1]
             logging.debug(f"[{fn}] Info extract time {t1}s")
             logging.debug(f"[{fn}] Downloading time {t2}s")
@@ -280,28 +297,32 @@ def download_item(item: dict, catalogue: str = "") -> None:
                 and info["thumbnail"]
             ):
                 logging.debug(f"[{fn}] Attaching thumbnail to audio {info["thumbnail"]}")
-                add_square_thumbnail_to_audio(final_filename, info["thumbnail"])
+                add_square_thumbnail_to_audio(fn, info["thumbnail"])
             
-        logging.info(f"Download complete '{final_filename}'")
+        logging.info(f"Download complete '{fn}'")
     except Exception as e:
         logging.error(f"Download {item['filename']} ({item['url']}) failed")
         logging.error(f"{type(e)} - {e}")
 
 
-def manage_threads(items: list[dict], catalogue:str = "") -> None:
+def manage_threads(items: list[dict], catalogue:str = "", context: Context = None) -> None:
     items = items.copy()
     threads = []
     while threads or items:
         remove_finished_threads(threads)
         for item in items.copy():
-            if len(threads) < MAX_THREADS:
-                threads.append(Thread(target=download_item, args=(item, catalogue, )))
+            if len(threads) < cfg.MAX_THREADS:
+                threads.append(Thread(target=download_item, args=(item, catalogue, context, )))
                 threads[-1].start()
                 items.remove(item)
         time.sleep(1)
 
 
-def main(inp):
+def main(inp: str, context: Context = None) -> None:
+    if not context:
+        context = Context()
+    context.output = context.output.replace('\\', '/').rstrip('/')
+    os.makedirs(context.output, exist_ok=True)
     playlist = ""
     if inp == "file":
         with open('input.txt') as f:
@@ -321,23 +342,11 @@ def main(inp):
             items = parse_items(inp.split("\n"))
             if not items:
                 raise ValueError("Can not parse any items")
-            download_item(items[0])
+            download_item(items[0], "", context)
         except Exception as e:
             logging.debug(f"{type(e)} - {e}")
             logging.error("Invalid input")
-            print("""
-Expected youtube playlist/video/music url or single entry. Example:
-
-https://youtube.com/playlist?list=example
-or
-https://youtube.com/watch?v=example
-or
-https://music.youtube.com/watch?v=example
-or
-audio ; https://music.youtube.com/watch?v=example ; song file name
-or
-video ; https://youtube.com/watch?v=example ; video file name
-""")
+            print(cfg.INPUT_ERROR_MESSAGE)
         return
     
     logging.info(f"Read {len(lines)} lines")
@@ -346,28 +355,21 @@ video ; https://youtube.com/watch?v=example ; video file name
     logging.info(f"Parsed {len(items)} items")
     
     beginning = time.time()
-    manage_threads(items, playlist)
+    manage_threads(items, playlist, context)
     new_files = [
-        f for f in os.listdir(f"result/{playlist}")
-        if not os.path.isdir(f"result/{playlist}{f}")
-        and os.path.getmtime(os.path.join(f"result/{playlist}", f)) > beginning
+        f for f in os.listdir(f"{context.output}/{playlist}")
+        if not os.path.isdir(f"{context.output}/{playlist}{f}")
+        and os.path.getmtime(os.path.join(f"{context.output}/{playlist}", f)) > beginning
     ]
     for f in new_files:
-        if (
-            len(f) <= 4 
-            or (
-                f[-4:] != ".mp4" 
-                and f[-4:] != ".mp3"
-            ) 
-            or f.endswith(".mp3.temp.mp3")
-        ):
-            os.remove(os.path.join(f"result/{playlist}", f))
+        if f.endswith(".mp3.temp.mp3"):
+            os.remove(os.path.join(f"{context.output}/{playlist}", f))
 
     for i in range(4):
         new_files = [
-            f for f in os.listdir(f"result/{playlist}")
-            if not os.path.isdir(f"result/{playlist}{f}")
-            and os.path.getmtime(os.path.join(f"result/{playlist}", f)) > beginning
+            f for f in os.listdir(f"{context.output}/{playlist}")
+            if not os.path.isdir(f"{context.output}/{playlist}{f}")
+            and os.path.getmtime(os.path.join(f"{context.output}/{playlist}", f)) > beginning
         ]
         logging.info(f"Done {len(new_files)}/{len(items)}")
         if len(new_files) == len(items):
@@ -402,76 +404,7 @@ video ; https://youtube.com/watch?v=example ; video file name
                 else:
                     logging.info(f"Restored {item['url']} -> {restored_url}")
                     item['url'] = restored_url
-            download_item(item, playlist)
-
-
-def version_check() -> bool:
-    current = ""
-    try:
-        with open(".version", "r") as f:
-            for l in str(f.read()):
-                if l in ".0123456789":
-                    current += l
-    except:
-        pass
-
-    current = [v for v in current.split('.') if v]
-    try:
-        current = list(map(int, current))
-    except:
-        current = [-1]
-    if not current:
-        current = [-1]
-    
-    print(f"  v{'.'.join([str(v) for v in current])}")
-    print()
-    
-    latest = ""
-    try:
-        url = git_link.strip('/').replace("://github.com/", "://raw.githubusercontent.com/")
-        url += "/refs/heads/main/.version"
-        resp = requests.get(url)
-        if resp.status_code // 100 not in [2, 3]:
-            raise ValueError()
-        text = resp.text
-        for l in text:
-            if l in ".0123456789":
-                latest += l
-    except:
-        print("  !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!")
-        print("    FAILED TO FETCH LATEST VERSION  ")
-        print("  !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!")
-        return False
-
-    latest = [v for v in latest.split('.') if v]
-    try:
-        latest = list(map(int, latest))
-    except:
-        latest = []
-    if not latest:
-        print("  !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!")
-        print("    FAILED TO FETCH LATEST VERSION  ")
-        print("  !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!")
-        return False
-    
-    for i in range(max(len(current), len(latest))):
-        c = current[i] if i < len(current) else 0
-        l = latest[i]  if i < len(latest)  else 0
-        
-        if l > c:
-            print("  !!!!!!!!!!!!!!!!!!!!!")
-            print("    NEW VERSION FOUND  ")
-            print("  !!!!!!!!!!!!!!!!!!!!!")
-            print(f"Found better version v{'.'.join(map(str, latest))}")
-            print(f"Update here: {git_link}")
-            print()
-            return True
-        elif l < c:
-            print(f"Program is newer (local v{'.'.join(map(str, current))} > latest v{'.'.join(map(str, latest))})")
-            return False
-    
-    print(f"Program is up to date (v{'.'.join(map(str, latest))})")
-    return False
+            download_item(item, playlist, context)
 
 
 if __name__ == "__main__":
@@ -483,35 +416,7 @@ if __name__ == "__main__":
             check=True
         )
     except:
-        print("FFmpeg is not found!")
+        print("FFmpeg not found!", file=sys.stderr)
         sys.exit(1)
-    print("""
-  ####     ####   ##   ##  ##  ##  ##      ####     ##    #####    ######  #####
-  ## ##   ##  ##  ##   ##  ### ##  ##     ##  ##   ####   ##  ##   ##      ##  ##
-  ##  ##  ##  ##  ##   ##  ######  ##     ##  ##  ##  ##  ##   ##  ##      ##  ##
-  ##  ##  ##  ##  ## # ##  ######  ##     ##  ##  ######  ##   ##  ####    #####
-  ##  ##  ##  ##  #######  ## ###  ##     ##  ##  ##  ##  ##   ##  ##      ####
-  ## ##   ##  ##  ### ###  ##  ##  ##     ##  ##  ##  ##  ##  ##   ##      ## ##
-  ####     ####   ##   ##  ##  ##  ######  ####   ##  ##  #####    ######  ##  ##
-""")
-    version_check()
-    print()
-    try:
-        inp = input("Enter URL or entry: \n> ").strip()
-    except:
-        sys.exit(1)
-    os.makedirs("logs", exist_ok=True)
-    os.makedirs("result", exist_ok=True)
-    log_file = f"logs/log_{int(time.time()*1000)}.txt"
-    logging.basicConfig(
-        level=logging.DEBUG,
-        format="[%(asctime)s] %(levelname)s - %(message)s",
-        handlers=[
-            logging.StreamHandler(sys.stdout),
-            logging.FileHandler(log_file, encoding="utf-8"),
-        ],
-    )
-    try:
-        main(inp)
-    finally:
-        print(f"Logs were saved to {log_file}")
+    start_module = importlib.import_module("yt-playlist-downloader")
+    start_module.cli()
