@@ -1,12 +1,73 @@
 import os
 import cfg
 import sys
+import json
 import time
 import logging
 import requests
 import subprocess
 from main import Context, main
 
+
+def check_ffmpeg():
+    try:
+        subprocess.run(
+            "ffmpeg -L",
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            check=True
+        )
+    except:
+        print("FFmpeg not found!", file=sys.stderr)
+        sys.exit(1)
+    
+def parse_args(context: Context):
+    if any(x in sys.argv for x in ("-r", "--reset-settings", "--resetsettings")):
+        try:
+            os.remove(cfg.SETTINGS_FILE)
+        except OSError:
+            pass
+    try:
+        saved_settings = json.load(open(cfg.SETTINGS_FILE, "r", encoding="utf-8"))
+    except (FileNotFoundError, json.JSONDecodeError):
+        saved_settings = {}
+    context.single_input = any(x in sys.argv for x in ("-s", "--single-input", "--singleinput"))
+    if not context.single_input:
+        context.single_input = saved_settings.get("single_input", context.single_input)
+    context.launch_checks = not any(x in sys.argv for x in ("-nc", "--no-checks", "--nocheks", "--nochek", "--nochecks"))
+    if not context.launch_checks:
+        context.launch_checks = saved_settings.get("launch_checks", context.launch_checks)
+    context.output = cfg.DEFAULT_OUTPUT_DIR
+    context.output = saved_settings.get("output_dir", context.output)
+    arg = [x for x in ("-o", "--output", "--output-dir", "--outputdir") if x in sys.argv]
+    if arg:
+        arg = arg[0]
+        try:
+            output_index = sys.argv.index(arg)
+            if output_index < len(sys.argv) - 1:
+                context.output = sys.argv[output_index + 1]
+        except:
+            pass
+    context.cookies = cfg.COOKIES
+    context.cookies = saved_settings.get("cookies", context.cookies)
+    arg = [x for x in ("-c", "--cookies") if x in sys.argv]
+    if arg:
+        arg = arg[0]
+        try:
+            cookies_index = sys.argv.index(arg)
+            if cookies_index < len(sys.argv) - 1:
+                context.cookies = sys.argv[cookies_index + 1]
+        except:
+            pass
+    if any(x in sys.argv for x in ("-sv", "--save-settings", "--savesettings")):
+        saved_settings = {
+            "single_input": context.single_input,
+            "launch_checks": context.launch_checks,
+            "output_dir": context.output,
+            "cookies": context.cookies,
+        }
+        with open(cfg.SETTINGS_FILE, "w", encoding="utf-8") as f:
+            json.dump(saved_settings, f, indent=2)
 
 def version_check() -> tuple[bool, str, str]:
     current = ""
@@ -105,49 +166,32 @@ def connection_check():
         print("BAD")
         print(cfg.BAD_CONNECTION_MESSAGE)
 
-def cookies_check(context: Context):
+def cookies_check(context: Context) -> int:
+    """ Returns:
+      1  if using cookies, 
+      0  if not using cookies, 
+      -1 if cookies were requested but not supported or invalid """
+    if not context.cookies:
+        print("Not using cookies")
+        return 0
     if not any(context.cookies.lower().startswith(x) for x in cfg.ALLOWED_BROWSERS):
         print("Browser for cookies not recognized! Disabling cookies")
         context.cookies = None
-    else:
-        print(f"Using cookies from {context.cookies}")
+        return -1
+    print(f"Using cookies from {context.cookies}")
+    return 1
 
 
-def cli():
-    if any(x in sys.argv for x in ("-h", "--help", "help")):
-        print(cfg.HELP_MESSAGE)
-        sys.exit(0)
-    
-    context = Context()
-    context.single_input = any(x in sys.argv for x in ("-s", "--single-input", "--singleinput"))
-    context.launch_checks = not any(x in sys.argv for x in ("-nc", "--no-checks", "--nocheks", "--nochek", "--nochecks"))
-    context.output = cfg.DEFAULT_OUTPUT_DIR
-    arg = [x for x in ("-o", "--output", "--output-dir", "--outputdir") if x in sys.argv]
-    if arg:
-        arg = arg[0]
-        try:
-            output_index = sys.argv.index(arg)
-            if output_index < len(sys.argv) - 1:
-                context.output = sys.argv[output_index + 1]
-        except:
-            pass
-    context.cookies = cfg.COOKIES
-    arg = [x for x in ("-c", "--cookies") if x in sys.argv]
-    if arg:
-        arg = arg[0]
-        try:
-            cookies_index = sys.argv.index(arg)
-            if cookies_index < len(sys.argv) - 1:
-                context.cookies = sys.argv[cookies_index + 1]
-        except:
-            pass
+def cli(context: Context = None):
+    if context is None:
+        context = Context()
 
     print(cfg.LOGO)
+
     if context.launch_checks:
         version_check()
         connection_check()
-        if context.cookies:
-            cookies_check(context)
+        cookies_check(context)
         print()
     print(f"Output directory: {os.path.abspath(context.output)}")
     print("Type help for more information")
@@ -184,16 +228,15 @@ def cli():
         print(f"Logs were saved to {log_file}")
 
 
-if __name__ == "__main__":
-    try:
-        subprocess.run(
-            "ffmpeg -L",
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-            check=True
-        )
-    except:
-        print("FFmpeg not found!", file=sys.stderr)
-        sys.exit(1)
+def launch():
+    if any(x in sys.argv for x in ("-h", "--help", "help")):
+        print(cfg.HELP_MESSAGE)
+        sys.exit(0)
+    
+    context = Context()
+    parse_args(context)
+    cli(context)
 
-    cli()
+
+if __name__ == "__main__":
+    launch()
